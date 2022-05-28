@@ -6,6 +6,12 @@ interface Env {
   PATH_PREFIX?: string
 }
 
+const defaultHeaders = {
+	"access-control-allow-origin": "*",
+	"access-control-expose-headers": "Content-Type",
+	"x-content-type-options": "nosniff"
+}
+
 type ParsedRange = { offset: number, length: number } | { suffix: number };
 
 function hasBody(object: R2Object | R2ObjectBody): object is R2ObjectBody {
@@ -27,12 +33,12 @@ export default {
     if (allowedMethods.indexOf(request.method) === -1) return new Response("Method Not Allowed", { status: 405 });
 
     if (request.method === "OPTIONS") {
-      return new Response(null, { headers: { "allow": allowedMethods.join(", ") } })
+      return new Response(null, { headers: { ...defaultHeaders, "allow": allowedMethods.join(", ") } })
     }
 
     const url = new URL(request.url);
     if (url.pathname === "/") {
-      return new Response("OK");
+      return new Response("OK", { headers: { ...defaultHeaders } });
     }
 
     const cache = caches.default;
@@ -52,7 +58,7 @@ export default {
         const rangeHeader = request.headers.get("range");
         if (rangeHeader) {
           file = await env.R2_BUCKET.head(path);
-          if (file === null) return new Response("File Not Found", { status: 404 });
+          if (file === null) return new Response("File Not Found", { status: 404, headers: { ...defaultHeaders } });
           const parsedRanges = parseRange(file.size, rangeHeader);
           // R2 only supports 1 range at the moment, reject if there is more than one
           if (parsedRanges !== -1 && parsedRanges !== -2 && parsedRanges.length === 1 && parsedRanges.type === "bytes") {
@@ -62,7 +68,7 @@ export default {
               length: firstRange.end - firstRange.start + 1
             }
           } else {
-            return new Response("Range Not Satisfiable", { status: 416 });
+            return new Response("Range Not Satisfiable", { status: 416, headers: { ...defaultHeaders } });
           }
         }
       }
@@ -96,7 +102,7 @@ export default {
         });
 
         if (file && !hasBody(file)) {
-          return new Response("Precondition Failed", { status: 412 });
+          return new Response("Precondition Failed", { status: 412, headers: { ...defaultHeaders } });
         }
       }
 
@@ -108,7 +114,7 @@ export default {
           file = await env.R2_BUCKET.get(path, { onlyIf: { uploadedAfter: new Date(ifModifiedSince) }, range });
         }
         if (file && !hasBody(file)) {
-          return new Response(null, { status: 304 });
+          return new Response(null, { status: 304, headers: { ...defaultHeaders } });
         }
       }
 
@@ -117,12 +123,14 @@ export default {
         : ((file && hasBody(file)) ? file : await env.R2_BUCKET.get(path, { range }));
 
       if (file === null) {
-        return new Response("File Not Found", { status: 404 });
+        return new Response("File Not Found", { status: 404, headers: { ...defaultHeaders } });
       }
 
       response = new Response((hasBody(file) && file.size !== 0) ? file.body : null, {
         status: range ? 206 : 200,
         headers: {
+          ...defaultHeaders,
+
           "accept-ranges": "bytes",
 
           "etag": file.httpEtag,
